@@ -3,6 +3,8 @@ import {
   BoardState,
   DEFAULT_PLAYERS,
   Player,
+  BoardShape,
+  TurnRule,
   createInitialBoard,
   makeMove,
   getBestMoveAI
@@ -22,11 +24,14 @@ import {
   Crown,
   Undo2,
   Sparkles,
-  Trophy
+  Trophy,
+  Gem
 } from 'lucide-react';
 
 export function App() {
-  const [gridSize, setGridSize] = useState<number>(4);
+  const [shape, setShape] = useState<BoardShape>('diamond');
+  const [turnRule, setTurnRule] = useState<TurnRule>('strict_turns');
+  const [gridSize, setGridSize] = useState<number>(3); // Radius 3 for diamond (25 cases)
   const [theme, setTheme] = useState<'wood' | 'marble' | 'obsidian'>('wood');
   const [isAiMode, setIsAiMode] = useState<boolean>(true);
   const [aiDifficulty, setAiDifficulty] = useState<'novice' | 'tactician' | 'grandmaster'>('tactician');
@@ -38,13 +43,15 @@ export function App() {
   const [isRulesOpen, setIsRulesOpen] = useState<boolean>(false);
   const [showGameOverModal, setShowGameOverModal] = useState<boolean>(false);
 
-  // Board state
-  const [board, setBoard] = useState<BoardState>(() => createInitialBoard(4, 4));
+  // Board state - initialized in Losange Doré & Strict Turns
+  const [board, setBoard] = useState<BoardState>(() => createInitialBoard(3, 'diamond', 'strict_turns'));
   const [history, setHistory] = useState<BoardState[]>([]);
   const [isAiThinking, setIsAiThinking] = useState<boolean>(false);
 
-  // Floating notifications / tips
-  const [statusMessage, setStatusMessage] = useState<string>('À vous de jouer, reliez 2 points.');
+  // Status notification message
+  const [statusMessage, setStatusMessage] = useState<string>(
+    'Losange Doré actif ! Les 4 coins sont attribués (2 pts chacun). À vous de jouer !'
+  );
 
   // Automatically trigger GameOverModal when game finishes
   useEffect(() => {
@@ -63,15 +70,35 @@ export function App() {
   };
 
   // Reset or restart match
-  const startNewMatch = useCallback((size: number = gridSize) => {
-    soundEngine.playClick();
-    const freshBoard = createInitialBoard(size, size);
-    setBoard(freshBoard);
-    setHistory([]);
-    setIsAiThinking(false);
-    setShowGameOverModal(false);
-    setStatusMessage('La partie commence ! Reliez 2 points.');
-  }, [gridSize]);
+  const startNewMatch = useCallback(
+    (
+      size: number = gridSize,
+      targetShape: BoardShape = shape,
+      targetRule: TurnRule = turnRule
+    ) => {
+      soundEngine.playClick();
+      const freshBoard = createInitialBoard(size, targetShape, targetRule);
+      setBoard(freshBoard);
+      setHistory([]);
+      setIsAiThinking(false);
+      setShowGameOverModal(false);
+
+      if (targetShape === 'diamond') {
+        setStatusMessage(
+          targetRule === 'strict_turns'
+            ? 'Losange Doré (Tour par Tour) ! Les 4 coins sont attribués. À vous !'
+            : 'Losange Doré (Combo) ! Les 4 coins sont attribués. Reliez 2 points.'
+        );
+      } else {
+        setStatusMessage(
+          targetRule === 'strict_turns'
+            ? 'Partie en Tour par Tour strict lancée ! Reliez 2 points.'
+            : 'La partie commence ! Reliez 2 points.'
+        );
+      }
+    },
+    [gridSize, shape, turnRule]
+  );
 
   // Handle human move
   const handleEdgeClick = (edgeId: string) => {
@@ -84,13 +111,24 @@ export function App() {
     setHistory(prev => [...prev, board]);
 
     const nextBoard = makeMove(board, edgeId);
-    
-    // Check if box was completed
-    if (nextBoard.scores[board.currentPlayer] > board.scores[board.currentPlayer]) {
-      soundEngine.playBoxCaptured(nextBoard.comboCount);
-      setStatusMessage(`Case capturée ! ${players[board.currentPlayer].name} rejoue !`);
+    const scoreDiff = nextBoard.scores[board.currentPlayer] - board.scores[board.currentPlayer];
+
+    if (scoreDiff > 0) {
+      soundEngine.playBoxCaptured(nextBoard.comboCount || 1);
+      if (board.turnRule === 'strict_turns') {
+        const nextP =
+          isAiMode && nextBoard.currentPlayer === 'player2'
+            ? "l'IA"
+            : players[nextBoard.currentPlayer].name;
+        setStatusMessage(`Case capturée (+${scoreDiff} pt) ! Au tour de ${nextP}.`);
+      } else {
+        setStatusMessage(`Case capturée ! ${players[board.currentPlayer].name} rejoue !`);
+      }
     } else {
-      const nextPName = isAiMode && nextBoard.currentPlayer === 'player2' ? "l'IA" : players[nextBoard.currentPlayer].name;
+      const nextPName =
+        isAiMode && nextBoard.currentPlayer === 'player2'
+          ? "l'IA"
+          : players[nextBoard.currentPlayer].name;
       setStatusMessage(`Au tour de ${nextPName}.`);
     }
 
@@ -101,8 +139,7 @@ export function App() {
   const handleUndo = () => {
     if (history.length === 0 || isAiThinking || board.isGameOver) return;
     soundEngine.playClick();
-    
-    // In AI mode, undo until it is player1's turn again
+
     if (isAiMode) {
       let targetIndex = -1;
       for (let i = history.length - 1; i >= 0; i--) {
@@ -119,7 +156,6 @@ export function App() {
       }
     }
 
-    // Standard 1-step undo for 2-player mode
     const prevBoard = history[history.length - 1];
     setBoard(prevBoard);
     setHistory(prev => prev.slice(0, prev.length - 1));
@@ -139,10 +175,15 @@ export function App() {
         if (bestMove) {
           soundEngine.playSegment(theme);
           const nextBoard = makeMove(board, bestMove);
+          const aiDiff = nextBoard.scores.player2 - board.scores.player2;
 
-          if (nextBoard.scores.player2 > board.scores.player2) {
-            soundEngine.playBoxCaptured(nextBoard.comboCount);
-            setStatusMessage("L'IA capture une case et enchaîne !");
+          if (aiDiff > 0) {
+            soundEngine.playBoxCaptured(nextBoard.comboCount || 1);
+            if (board.turnRule === 'strict_turns') {
+              setStatusMessage("L'IA capture une case ! C'est à votre tour (Tour par tour).");
+            } else {
+              setStatusMessage("L'IA capture une case et enchaîne !");
+            }
           } else {
             setStatusMessage('À votre tour de jouer !');
           }
@@ -159,10 +200,14 @@ export function App() {
   return (
     <div className="min-h-full w-full flex flex-col justify-between overflow-x-hidden bg-stone-950 text-stone-100 selection:bg-amber-500/30">
       {/* Top Luxury Navigation Header */}
-      <header className="w-full max-w-md mx-auto pt-3 px-4 pb-1 flex items-center justify-between border-b border-stone-800/60">
+      <header className="w-full max-w-md mx-auto pt-2.5 px-3 pb-1 flex items-center justify-between border-b border-stone-800/60">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-400 to-amber-700 p-0.5 shadow-md flex items-center justify-center">
-            <Crown className="w-4 h-4 text-stone-950" />
+            {shape === 'diamond' ? (
+              <Gem className="w-4 h-4 text-stone-950" />
+            ) : (
+              <Crown className="w-4 h-4 text-stone-950" />
+            )}
           </div>
           <div>
             <h1 className="text-sm font-bold tracking-wider font-serif-luxury text-stone-100 flex items-center gap-1.5">
@@ -172,7 +217,7 @@ export function App() {
               </span>
             </h1>
             <p className="text-[10px] text-stone-400 font-serif-luxury tracking-wide">
-              Pipopipette Stratégique
+              {shape === 'diamond' ? 'Édition Losange Doré' : 'Pipopipette Stratégique'}
             </p>
           </div>
         </div>
@@ -212,7 +257,7 @@ export function App() {
       </header>
 
       {/* Main Game Screen */}
-      <main className="flex-1 flex flex-col justify-center items-center py-2 max-w-lg mx-auto w-full">
+      <main className="flex-1 flex flex-col justify-center items-center py-1 max-w-lg mx-auto w-full">
         {/* Dynamic Score Board */}
         <div className="w-full mb-1">
           <ScoreBoard
@@ -230,25 +275,25 @@ export function App() {
         </div>
 
         {/* Status / Tactical Feedback Toast */}
-        <div className="my-1.5 px-3 py-1 rounded-full bg-stone-900/80 border border-stone-800 text-[11px] text-stone-300 flex items-center gap-1.5 shadow-sm">
+        <div className="my-1 px-3 py-1 rounded-full bg-stone-900/80 border border-stone-800 text-[11px] text-stone-300 flex items-center gap-1.5 shadow-sm text-center max-w-[94%] mx-auto">
           {board.isGameOver && !showGameOverModal ? (
             <button
               onClick={() => {
                 soundEngine.playClick();
                 setShowGameOverModal(true);
               }}
-              className="flex items-center gap-1.5 text-amber-300 hover:text-amber-200 font-semibold cursor-pointer"
+              className="flex items-center gap-1.5 text-amber-300 hover:text-amber-200 font-semibold cursor-pointer mx-auto"
             >
               <Trophy className="w-3.5 h-3.5 text-amber-400" />
               Partie terminée • Revoir le podium &amp; score
             </button>
           ) : isAiThinking ? (
-            <span className="flex items-center gap-1 text-sky-400 font-medium">
+            <span className="flex items-center justify-center gap-1 text-sky-400 font-medium mx-auto">
               <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
               L'IA réfléchit...
             </span>
           ) : (
-            <span className="flex items-center gap-1.5">
+            <span className="flex items-center justify-center gap-1.5 mx-auto">
               <Sparkles className="w-3 h-3 text-amber-400 shrink-0" />
               {statusMessage}
             </span>
@@ -265,7 +310,7 @@ export function App() {
         />
 
         {/* Bottom Game Controls (Undo & Reset) */}
-        <div className="w-full max-w-xs px-4 mt-2 flex items-center justify-center gap-3">
+        <div className="w-full max-w-xs px-4 mt-1 flex items-center justify-center gap-3">
           <button
             onClick={handleUndo}
             disabled={history.length === 0 || isAiThinking || board.isGameOver}
@@ -290,9 +335,9 @@ export function App() {
       </main>
 
       {/* Footer Branding */}
-      <footer className="w-full text-center py-2 text-[10px] text-stone-500 border-t border-stone-900">
+      <footer className="w-full text-center py-1.5 text-[10px] text-stone-500 border-t border-stone-900">
         <p className="tracking-wide">
-          <span className="font-serif-luxury text-stone-400">Dots &amp; Boxes</span> (by K.R) &bull; Édition Tactique Mobile
+          <span className="font-serif-luxury text-stone-400">Dots &amp; Boxes</span> (by K.R) &bull; Mode Losange Doré &bull; Mobile-First
         </p>
       </footer>
 
@@ -300,10 +345,24 @@ export function App() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        shape={shape}
+        onSelectShape={(newShape) => {
+          setShape(newShape);
+          const defaultSize = newShape === 'diamond' ? 3 : 4;
+          setGridSize(defaultSize);
+          startNewMatch(defaultSize, newShape, turnRule);
+          setIsSettingsOpen(false);
+        }}
+        turnRule={turnRule}
+        onSelectTurnRule={(newRule) => {
+          setTurnRule(newRule);
+          startNewMatch(gridSize, shape, newRule);
+          setIsSettingsOpen(false);
+        }}
         gridSize={gridSize}
         onSelectGridSize={(size) => {
           setGridSize(size);
-          startNewMatch(size);
+          startNewMatch(size, shape, turnRule);
           setIsSettingsOpen(false);
         }}
         theme={theme}
@@ -311,19 +370,16 @@ export function App() {
         isAiMode={isAiMode}
         onToggleAiMode={(ai) => {
           setIsAiMode(ai);
-          startNewMatch();
+          startNewMatch(gridSize, shape, turnRule);
         }}
         aiDifficulty={aiDifficulty}
         onSelectAiDifficulty={setAiDifficulty}
         isMuted={isMuted}
         onToggleMute={toggleMute}
-        onRestartMatch={() => startNewMatch()}
+        onRestartMatch={() => startNewMatch(gridSize, shape, turnRule)}
       />
 
-      <RulesModal
-        isOpen={isRulesOpen}
-        onClose={() => setIsRulesOpen(false)}
-      />
+      <RulesModal isOpen={isRulesOpen} onClose={() => setIsRulesOpen(false)} />
 
       <GameOverModal
         isOpen={showGameOverModal}
@@ -331,7 +387,7 @@ export function App() {
         board={board}
         players={players}
         isAiPlaying={isAiMode}
-        onRestart={() => startNewMatch()}
+        onRestart={() => startNewMatch(gridSize, shape, turnRule)}
         onOpenSettings={() => {
           soundEngine.playClick();
           setShowGameOverModal(false);
@@ -341,4 +397,5 @@ export function App() {
     </div>
   );
 }
+
 export default App;

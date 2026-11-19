@@ -1,5 +1,5 @@
 import React from 'react';
-import { BoardState, DEFAULT_PLAYERS, Player } from '../utils/gameLogic';
+import { BoardState, DEFAULT_PLAYERS } from '../utils/gameLogic';
 
 interface ScoreBoardProps {
   board: BoardState;
@@ -14,12 +14,11 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
   isAiPlaying,
   aiDifficulty
 }) => {
-  const { scores, currentPlayer, rows, cols } = board;
-  const totalBoxes = rows * cols;
+  const { scores, currentPlayer, rows, cols, totalBoxes, shape, turnRule } = board;
   const p1Score = scores.player1;
   const p2Score = scores.player2;
   const claimedBoxes = p1Score + p2Score;
-  const remainingBoxes = totalBoxes - claimedBoxes;
+  const remainingBoxes = Math.max(0, totalBoxes - claimedBoxes);
 
   const p1Percent = totalBoxes > 0 ? (p1Score / totalBoxes) * 100 : 0;
   const p2Percent = totalBoxes > 0 ? (p2Score / totalBoxes) * 100 : 0;
@@ -107,17 +106,22 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
       {/* Dynamic Dominance Bar & Remaining Counter */}
       <div className="mt-2.5 px-1">
         <div className="flex items-center justify-between text-[11px] text-stone-400 mb-1">
-          <span>{remainingBoxes} case{remainingBoxes > 1 ? 's' : ''} restante{remainingBoxes > 1 ? 's' : ''}</span>
-          <span className="font-serif-luxury text-amber-200/80 tracking-wide">Grille {rows}×{cols}</span>
+          <span>
+            {remainingBoxes} case{remainingBoxes > 1 ? 's' : ''} restante{remainingBoxes > 1 ? 's' : ''}
+          </span>
+          <span className="font-serif-luxury text-amber-200/90 tracking-wide">
+            {shape === 'diamond' ? `Losange • ${totalBoxes} cases` : `Grille ${rows}×${cols}`}
+            <span className="ml-1 text-[9px] px-1 py-0.2 rounded bg-stone-800 text-stone-300">
+              {turnRule === 'strict_turns' ? 'Tour/Tour' : 'Combo'}
+            </span>
+          </span>
         </div>
         <div className="w-full h-1.5 bg-stone-800 rounded-full overflow-hidden flex shadow-inner">
           <div
             className="h-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-500"
             style={{ width: `${p1Percent}%` }}
           />
-          <div
-            className="h-full bg-transparent flex-1"
-          />
+          <div className="h-full bg-transparent flex-1" />
           <div
             className="h-full bg-gradient-to-l from-sky-600 to-sky-400 transition-all duration-500"
             style={{ width: `${p2Percent}%` }}
